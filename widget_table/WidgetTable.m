@@ -1,4 +1,61 @@
 classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
+% WidgetTable - An appdesigner table using widgets/controls to represent data
+
+    % Todo:
+    % Header heights are hardcoded. Should be adjustable...
+
+    events (HasCallbackProperty, NotifyAccess = private)
+        RowAdded
+        RowRemoved
+        %CellEdited
+        %CellAction
+    end
+    
+    properties (Access = public)
+        ItemName (1,1) string = missing
+        ColumnNames (1,:) cell
+        ColumnHeaderHelpFcn
+    end
+    
+    % Todo: Make Layout and Theme classes for fine-grained control of
+    % sizing and colors
+
+    properties (Dependent)
+        Data
+        Height % Height of table (does not include "internal" columns)
+        Width  % Width of table (does not include "internal" columns)
+    end
+
+    properties % Public table configuration properties
+        EnableAddRows matlab.lang.OnOffSwitchState = "on"
+        ShowColumnHeaderHelp matlab.lang.OnOffSwitchState = "on"
+
+        RowHeight (1,1) double = 23
+        RowSpacing (1,1) double = 15
+                
+        ColumnWidget (1,:) cell
+        ColumnWidth = {}
+        MinimumColumnWidth (1,:) double = 30 % Width in pixels. Scalar value or array with one element per column
+        MaximumColumnWidth (1,:) double = 300 % Width in pixels. Scalar value or array with one element per column
+        
+        ColumnSpacing = 20
+        ColumnGridWidth = 1 % Currently only for header.
+
+        FontName = 'helvetica' %'Segoe UI'
+        CellEditedFcn
+        %CellActionFcn % Todo
+    end
+
+    properties % Theme/color properties
+        RowFocusColor = "#e9edf4"
+        HeaderForegroundColor = "white"
+        HeaderTextColor = "black"
+        HeaderBackgroundColor = "#303E4C"
+    end
+    
+    properties (Dependent)
+        TableBorderType = "line"
+    end
 
     % Properties that correspond to underlying components
     properties (Access = private, Transient, NonCopyable)
@@ -16,47 +73,6 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         HeaderColumnGridLayout (1,:) matlab.ui.container.GridLayout
         HeaderColumnTitle (1,:) matlab.ui.control.Label
     end
-    
-    properties (Access = public)
-        ColumnNames (1,:) cell
-    end
-    
-    % Todo: Make Layout and Theme classes for fine-grained control of
-    % sizing and colors
-
-    properties (Dependent)
-        Data
-        Height % Height of table (does not include "internal" columns)
-        Width  % Width of table (does not include "internal" columns)
-    end
-
-    properties % Public table configuration properties
-        EnableAddRows matlab.lang.OnOffSwitchState = "on" % todo
-
-        RowHeight (1,1) double = 23
-        RowSpacing (1,1) double = 15
-                
-        ColumnWidget (1,:) cell
-        ColumnWidth = {}
-        MinimumColumnWidth (1,:) double = 30 % Width in pixels. Scalar value or array with one element per column
-        MaximumColumnWidth (1,:) double = 300 % Width in pixels. Scalar value or array with one element per column
-        
-        ColumnSpacing = 20
-        ColumnGridWidth = 1 % Currently only for header.
-
-        FontName = 'Segoe UI'
-        CellEditedFcn
-    end
-
-    properties % Theme/color properties
-        RowFocusColor = "#e9edf4"
-        HeaderForegroundColor = "w"
-        HeaderBackgroundColor = "#303E4C"
-    end
-    
-    properties (Dependent)
-        TableBorderType = "line"
-    end
 
     properties (Dependent, Access = private)
         NumRows
@@ -68,6 +84,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
     properties (Access = private)
         Data_
+        DefaultRowData_
     end
 
     properties (SetAccess = private)
@@ -76,16 +93,13 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
     properties (Access = private)
         % Padding of table (inside panel)
-        TablePadding = [7,0,20,0]
+        TablePadding = [7,0,20,0] %todo: bottom, top
 
         % Margins of component (outside panel)
         Margin = [0,0,0,0]
 
-        HeaderPadding = [0, 4, 0, 7]
-    end
-
-    properties (Access = private) % Todos
-        ShowColumnHeaderHelp matlab.lang.OnOffSwitchState = "off" % todo
+        HeaderHeight (1,1) double = 36
+        HeaderPadding = [0, 0, 0, 10]
     end
 
     properties (Access = private) % Internal UI Components
@@ -98,6 +112,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         SizeChangedListener
         MouseMotionListener
         HeaderColumnImage (1,:) matlab.ui.control.Image
+        HelpButton (1,:) IconButton
+        AddRowButtonGridInitial
+        AddRowButtonInitial
     end
 
     properties (Access = private)
@@ -122,10 +139,13 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         ColumnFlexWeights (1,:) double
     end
 
-    properties (Access = private)
+    properties (Access = private, UsedInUpdate=false)
         % Dummy grid used for validating ColumnWidth
         DummyGridLayout matlab.ui.container.GridLayout
         UseDummyFlexColumn matlab.lang.OnOffSwitchState = "off"
+        LastMousePoint
+        LastMouseTic
+        PointerOffset
     end
 
     properties (Constant, Access=private)
@@ -133,11 +153,26 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         ICON_PATH = fullfile( fileparts(mfilename('fullpath')), 'resources', 'icons' )
     end
 
+
     methods % Public methods
         function updateCellValue(comp, rowIndex, columnIndex, cellValue)
             % No callback (i.e set programmatically)
             cellValue = comp.setCellValue(rowIndex, columnIndex, cellValue);
             comp.updateComponentValue(rowIndex, columnIndex, cellValue)
+        end
+    
+        function setDefaultRowData(comp, rowData)
+            if ~isempty(comp.Data)
+                error('Can not set "DefaultRowData" when "Data" is non-empty')
+            end
+            % Todo: Chekc that number of rows match preconfigured number of
+            % rows if present...
+            comp.DefaultRowData_ = rowData;
+        end
+
+        function redraw(comp)
+            comp.update()
+            comp.resizeTableColumns()
         end
     end
 
@@ -185,7 +220,13 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         function set.EnableAddRows(comp, value)
             oldValue = comp.EnableAddRows;
             comp.EnableAddRows = value;
-            comp.postSetEnableAddRows(value, oldValue)            
+            comp.postSetEnableAddRows(value, oldValue)
+        end
+
+        function set.ShowColumnHeaderHelp(comp, value)
+            oldValue = comp.ShowColumnHeaderHelp;
+            comp.ShowColumnHeaderHelp = value;
+            comp.postSetShowColumnHeaderHelp(value, oldValue)
         end
 
         function set.RowHeight(comp, value)
@@ -196,6 +237,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         function set.RowSpacing(comp, value)
             comp.RowSpacing = value;
             comp.postSetRowSpacing()
+        end
+
+        function set.ItemName(comp, value)
+            comp.ItemName = value;
+            comp.postSetItemName()
         end
 
         function set.ColumnNames(comp, value)
@@ -265,6 +311,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.postSetHeaderBackgroundColor()
         end
 
+        function set.HeaderTextColor(comp, newValue)
+            comp.HeaderTextColor = newValue;
+            comp.postSetHeaderTextColor()
+        end
+        
         function set.HeaderForegroundColor(comp, newValue)
             comp.HeaderForegroundColor = newValue;
             comp.postSetHeaderForegroundColor()
@@ -348,6 +399,18 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.resizeTableColumns()
         end
         
+        function postSetShowColumnHeaderHelp(comp, newValue, oldValue)
+            if oldValue && ~newValue
+                comp.hideHeaderHelpButtons()
+            elseif newValue && ~oldValue
+                comp.showHeaderHelpButtons() % todo create/show?
+            else
+                % pass
+                return
+            end
+        end
+
+
         function postSetRowHeight(comp)
             comp.updateTableRowHeight()
         end
@@ -357,6 +420,15 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             rowPadding = comp.getRowPadding();
             for i = 1:numel(comp.RowGridLayout)
                 comp.RowGridLayout(i).Padding = rowPadding;
+            end
+        end
+
+        function postSetItemName(comp)
+            if ~isempty(comp.AddRowButtonInitial)
+                comp.AddRowButtonInitial.Text = sprintf('Add a %s', comp.ItemName);
+            end
+            if ~isempty(comp.AddRowButton)
+                comp.AddRowButton.Tooltip = sprintf('Add new %s', comp.ItemName);
             end
         end
 
@@ -403,13 +475,30 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             if ~isempty(comp.HeaderColumnGridLayout)
                 set(comp.HeaderColumnGridLayout, ...
                     'BackgroundColor', comp.HeaderBackgroundColor)
-            end            
+            end
+            if ~isempty(comp.HelpButton)
+                for i = 1:numel(comp.HelpButton)
+                    comp.HelpButton(i).BackgroundColor = comp.HeaderBackgroundColor;
+                end
+            end
+        end
+
+        function postSetHeaderTextColor(comp)
+            if ~isempty(comp.HeaderColumnTitle)
+                set(comp.HeaderColumnTitle, ...
+                    'FontColor', comp.HeaderTextColor)
+            end
         end
 
         function postSetHeaderForegroundColor(comp)
-            if ~isempty(comp.HeaderColumnTitle)
-                set(comp.HeaderColumnTitle, ...
-                    'FontColor', comp.HeaderForegroundColor)
+            % if ~isempty(comp.HeaderColumnTitle)
+            %     set(comp.HeaderColumnTitle, ...
+            %         'FontColor', comp.HeaderForegroundColor)
+            % end
+            if ~isempty(comp.HelpButton)
+                for i = 1:numel(comp.HelpButton)
+                    comp.HelpButton(i).Color = comp.HeaderForegroundColor;
+                end
             end
         end
     end
@@ -418,6 +507,12 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         function onDataSet(comp)
             comp.resetTable()
             drawnow
+
+            if comp.Height > 0 && ~isempty(comp.AddRowButtonGridInitial)
+                delete(comp.AddRowButtonGridInitial)
+                comp.AddRowButtonGridInitial = [];
+                comp.AddRowButtonGrid.Visible = 'on';
+            end
 
             comp.updateInternalColumnWidth()
             comp.updateTableColumnWidth()
@@ -439,8 +534,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             delete(hWaitbar)
             warning('on')
             drawnow
-
+            
             comp.resizeTableColumns()
+
+            rowData = comp.getRowData(1);
+            comp.DefaultRowData_ = comp.resetData(rowData); % Clear all values.
         end
 
         function onComponentSizeChanged(comp, src, evt)
@@ -493,12 +591,19 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                     comp.HeaderColumnGridLayout(i) = comp.createColumnTitleGrid(i);
                     %[comp.HeaderColumnTitle(i), comp.HeaderColumnImage(i)] = comp.createColumnTitleLabel(i); % todo
                     [comp.HeaderColumnTitle(i), ~] = comp.createColumnTitleLabel(i);
+
+                    if comp.ShowColumnHeaderHelp
+                        comp.HelpButton(i) = comp.createHelpIconButton(i);
+                        if comp.HeaderColumnTitle(i).Text == ""
+                            comp.HelpButton(i).Visible = 'off';
+                        end
+                    end
                 else
                     comp.updateColumnTitle(i)
                 end
             end
         end
-
+        
         function createRows(comp)
             numColumns = comp.NumColumns;
 
@@ -511,6 +616,8 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             if comp.EnableAddRows
                 if isempty(comp.AddRowButton)
                     comp.AddRowButton = comp.createAddRowButton(comp.NumRows, 1);
+                else
+                    comp.moveAddRowButton('bottom')
                 end
             end
         end
@@ -589,6 +696,10 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 hControl.Value = cellValue;
                 hControl.ValueChangedFcn = @comp.onCellValueChanged;
             end
+
+            if isprop(hControl, 'Action')
+                
+            end
         end
 
         function hButton = createRemoveRowButton(comp, iRow, iColumn)
@@ -600,6 +711,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             hButton.Text = '';
             hButton.Icon = fullfile(comp.ICON_PATH, 'minus.png');
             hButton.ButtonPushedFcn = @comp.onRemoveRowButtonPushed;
+            hButton.Tooltip = 'Remove row';
         end
 
         function hButton = createAddRowButton(comp, iRow, iColumn) %#ok<INUSD>
@@ -617,6 +729,38 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             hButton.Text = '';
             hButton.Icon = fullfile(comp.ICON_PATH, 'plus.png');
             hButton.ButtonPushedFcn = @comp.onAddRowButtonPushed;
+            if ~ismissing(comp.ItemName)
+                hButton.Tooltip = sprintf('Add new %s', comp.ItemName);
+            else
+                hButton.Tooltip = 'Add new row';
+            end
+            if iRow == 1
+                comp.AddRowButtonGrid.Visible = 'off';
+                comp.createAddRowInitialButton()
+            end
+        end
+
+        function createAddRowInitialButton(comp)
+        % Create a grid layout that covers the full TableRowGridLayout
+        % and add a button to the grid layout.
+            comp.AddRowButtonGridInitial = uigridlayout(comp.TablePanel);
+            comp.AddRowButtonGridInitial.ColumnWidth = {'1x', 250, '1x'};
+            comp.AddRowButtonGridInitial.RowHeight = {'1x', 40, '1x'};
+            comp.AddRowButtonGridInitial.Padding = [0,0,0,0];
+            comp.AddRowButtonGridInitial.Visible = 'on';
+            comp.AddRowButtonGridInitial.BackgroundColor = 'white';
+
+            comp.AddRowButtonInitial = uibutton(comp.AddRowButtonGridInitial);
+            if ~ismissing(comp.ItemName)
+                comp.AddRowButtonInitial.Text = sprintf('Add a %s', comp.ItemName);
+            else
+                comp.AddRowButtonInitial.Text = 'Add a row';
+            end
+            comp.AddRowButtonInitial.Icon = fullfile(comp.ICON_PATH, 'plus.png');
+            comp.AddRowButtonInitial.ButtonPushedFcn = @comp.onAddRowButtonPushed;
+                        
+            comp.AddRowButtonInitial.Layout.Row = 2;
+            comp.AddRowButtonInitial.Layout.Column = 2;
         end
 
         function createRowGrid(comp, iRow)
@@ -638,9 +782,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
         function h = createColumnTitleGrid(comp, iColumn)
             h = uigridlayout(comp.HeaderGridLayout);
-            h.ColumnWidth = {'1x', 18};
+            h.ColumnWidth = { '1x', 25};
             h.RowHeight = {'1x'};
-            h.ColumnSpacing = 5;
+            h.ColumnSpacing = 0;
             
             xPadding = comp.ColumnSpacing - comp.ColumnGridWidth;
             xPaddingLeft = ceil(xPadding/2);
@@ -669,7 +813,8 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
             hLabel = uilabel(comp.HeaderColumnGridLayout(iColumn));
             hLabel.Text = columnTitle;
-            hLabel.FontColor = comp.HeaderForegroundColor;
+            %hLabel.FontColor = comp.HeaderForegroundColor;
+            hLabel.FontColor = comp.HeaderTextColor;
             hLabel.FontName = comp.FontName;
             hLabel.FontWeight = 'bold';
             hLabel.Layout.Row = 1;
@@ -702,25 +847,26 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 end
             end
 
-            if comp.ShowColumnHeaderHelp && iColumn ~= 1
-                % Create help icon
-                hHelpButton = comp.createHelpIconButton(comp.HeaderColumnGridLayout(iColumn));
-                hHelpButton.Tag = columnTitle;
-                hHelpButton.Layout.Row = 1;
-                hHelpButton.Layout.Column = 2;
-            elseif ~comp.ShowColumnHeaderHelp 
+            if ~comp.ShowColumnHeaderHelp
                 hLabel.Layout.Column = [1,2];
                 hImage.Layout.Column = [1,2];
             end
         end
 
-        function hIconButton = createHelpIconButton(comp, hContainer)
-        %createHelpIconButton Create a help button TODO
-        
-            hIconButton = uiimage(hContainer);
+        function hIconButton = createHelpIconButton(comp, iColumn)
+        %createHelpIconButton Create a help button for the column headers.     
+            hIconButton = IconButton(comp.HeaderColumnGridLayout(iColumn), ...
+                'SVGSource', fullfile(comp.ICON_PATH, 'help.svg'), ...
+                'Color', comp.HeaderForegroundColor);
             hIconButton.Tooltip = 'Press for help';
-            hIconButton.ImageSource = fullfile(comp.ICON_PATH, 'help.png');
-            %hIconButton.ImageClickedFcn = @comp.onHelpButtonClicked;
+            hIconButton.ButtonPushedFcn = @comp.onHelpButtonClicked;
+            hIconButton.BackgroundColor = comp.HeaderBackgroundColor;
+            hIconButton.Height = 20;
+            hIconButton.Width = 20;
+            hIconButton.Padding = 0;
+            hIconButton.Tag = comp.HeaderColumnTitle(iColumn).Text;
+            hIconButton.Layout.Row = 1;
+            hIconButton.Layout.Column = 2;
         end
 
         function createViewportListener(comp)
@@ -767,7 +913,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         function moveAddRowButton(comp, direction)
             arguments
                 comp
-                direction (1,1) string {mustBeMember(direction, ["up", "down"])} = "down"
+                direction (1,1) string {mustBeMember(direction, ["up", "down", "top", "bottom"])} = "down"
             end
 
             switch direction
@@ -775,11 +921,16 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                     comp.AddRowButton.Parent.Layout.Row = comp.AddRowButton.Parent.Layout.Row - 1;
                 case "down"
                     comp.AddRowButton.Parent.Layout.Row = comp.AddRowButton.Parent.Layout.Row + 1;
+                case "bottom"
+                    comp.AddRowButton.Parent.Layout.Row = comp.NumRows;
+                case "top"
+                    comp.AddRowButton.Parent.Layout.Row = 1;
             end
         end
     
         function resetTable(comp)
             delete(comp.HeaderColumnGridLayout)
+            comp.HeaderColumnGridLayout(:) = [];
             % delete components
         end
     
@@ -793,19 +944,43 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 yScrollOffset = comp.TableRowGridLayout.ScrollableViewportLocation(2);
             end
 
-            yPoint = hFigure.CurrentPoint(2);
+            if isempty(comp.LastMousePoint)
+                comp.LastMousePoint = hFigure.CurrentPoint;
+                comp.LastMouseTic = tic;
+                comp.PointerOffset = [0,0];
+            end
 
+            if toc(comp.LastMouseTic) > 1 % Reset...
+                comp.LastMousePoint = hFigure.CurrentPoint;
+                comp.PointerOffset = [0,0];
+            end
+
+            currentPoint = hFigure.CurrentPoint;
+
+            offset = abs( comp.LastMousePoint - currentPoint );
+            
+            % Correct a weird bug(?) in MATLAB
+            if any(offset > 50)
+                if any( comp.PointerOffset )
+                    comp.PointerOffset = [0,0];
+                else
+                    comp.PointerOffset = comp.LastMousePoint - currentPoint;
+                end
+            end
+            yPoint = currentPoint(2) + comp.PointerOffset(2);
+            
             rowExtent = comp.TableRowGridLayout.RowHeight{1} + comp.TableRowGridLayout.RowSpacing;
 
             pos = comp.CachedTableRowGridPosition;
             y0 = pos(2);
             yPoint = yPoint-y0;
             
-            yOffsetFromTop = pos(4) - yPoint - yScrollOffset;
+            yPaddingTop = comp.TableRowGridLayout.Padding(4);
+            
+            yOffsetFromTop = pos(4) - yPaddingTop - yPoint - yScrollOffset;
 
             rowInd = ceil(yOffsetFromTop/rowExtent);
-            
-            set(comp.RowGridLayout, 'BackgroundColor', 'w');
+            set(comp.RowGridLayout, 'BackgroundColor', comp.BackgroundColor);
 
             if rowInd >= 1 && rowInd <= comp.Height
                 if numel(comp.RowGridLayout) >= rowInd % Might fail during initialization
@@ -814,6 +989,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             else
                 % pass (All bg colors are reset before this block)
             end
+            
+            comp.LastMouseTic = tic;
+            comp.LastMousePoint = currentPoint;
         end
     
         function updateColumnTitle(comp, iColumn, hControl)
@@ -881,6 +1059,34 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             set(comp.RowGridLayout, 'BackgroundColor', comp.BackgroundColor)
             set(comp.AddRowButtonGrid, 'BackgroundColor', comp.BackgroundColor)
         end
+    
+        function showHeaderHelpButtons(comp)
+            if isempty(comp.HeaderColumnGridLayout); return; end
+
+            if ~isempty(comp.HelpButton)
+                set(comp.HelpButton, 'Visible', 'on')
+            else
+                for i = 1:numel(comp.HeaderColumnTitle)
+                    comp.HelpButton(i) = comp.createHelpIconButton(i);
+                end
+            end
+            
+            for i = 1:numel(comp.HeaderColumnTitle)
+                comp.HeaderColumnTitle(i).Layout.Column = 1;
+                if comp.HeaderColumnTitle(i).Text == ""
+                    comp.HelpButton(i).Visible = 'off';
+                end
+            end
+
+            comp.updateHeaderGridLayoutColumnWidth()
+        end
+
+        function hideHeaderHelpButtons(comp)
+            set(comp.HelpButton, 'Visible', 'off')
+            for i = 1:numel(comp.HeaderColumnTitle)
+                comp.HeaderColumnTitle(i).Layout.Column = [1,2];
+            end
+        end
     end
     
     methods (Access = private) % Sub-component callbacks
@@ -890,6 +1096,21 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             uialert(hFigure, 'Clicked column title', '')
         end
         
+        function onHelpButtonClicked(comp, src, ~)
+        %onHelpButtonClicked Show help message using uialert
+        
+            if ~isempty(comp.ColumnHeaderHelpFcn)
+                msg = comp.ColumnHeaderHelpFcn(src.Tag);
+            else
+                msg = 'No help available';
+            end
+        
+            hFigure = ancestor(comp, 'figure');
+            
+            title = sprintf('Help for %s', src.Tag);
+            uialert(hFigure, msg, title, 'Icon', 'info')
+        end
+
         function onCellValueChanged(comp, src, evt)
         % onCellValueChanged - Handle value changed for table cell.
 
@@ -911,13 +1132,14 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
         function onRemoveRowButtonPushed(comp, src, evt)
             drawnow
-            hWaitbar = comp.displayWaitbar("Removing row");
 
             rowIndex = find( [comp.RowComponents{:,1}]==src, 1, "first" );
 
-            % for iColumn = 1:size(comp.RowComponents, 2)
-            %     delete(comp.RowComponents{rowIndex, iColumn})
-            % end
+            if (comp.Height - rowIndex) > 30  % Ad hoc. Better value?
+                hWaitbar = comp.displayWaitbar("Removing row");
+            else
+                hWaitbar = [];
+            end
 
             comp.removeDataRow(rowIndex)
 
@@ -975,17 +1197,29 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.updateTableRowHeight()
 
             drawnow
-            delete(hWaitbar)
+            if ~isempty(hWaitbar)
+                delete(hWaitbar)
+            end
+
+            eventData = RowRemovedEventData(rowIndex);
+            comp.notify('RowRemoved', eventData)
+
+            if comp.Height == 0
+                if ~isempty(comp.AddRowButtonGridInitial)
+                    comp.AddRowButtonGridInitial.Visible = 'on';
+                else
+                    comp.createAddRowInitialButton()
+                end
+            end
         end
 
         function onAddRowButtonPushed(comp, src, evt)
-            if ~isempty(comp.Data)
-                rowData = comp.getRowData(1);
-                rowData = comp.resetData(rowData); % Clear all values.
+            if ~isempty(comp.DefaultRowData_)
+                rowData = comp.DefaultRowData_;
                 comp.appendRowData(rowData)
-
             else
                 comp.Data_ = cell2table( repmat({""}, 1, comp.Width), "VariableNames", comp.ColumnTitles);
+                rowData = comp.Data_; 
             end
 
             comp.updateTableRowHeight()
@@ -994,8 +1228,24 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 comp.moveAddRowButton("down")
             end
 
-            iRow = comp.Height;
-            comp.RowComponents(iRow, 1:comp.NumColumns) = comp.createRowComponents(iRow);
+            if ~isempty(comp.AddRowButtonGridInitial)
+                delete(comp.AddRowButtonGridInitial);
+                comp.AddRowButtonGridInitial=[];
+            end
+
+            if ~comp.AddRowButtonGrid.Visible
+                comp.AddRowButtonGrid.Visible = 'on';
+            end
+
+            rowIndex = comp.Height;
+            comp.RowComponents(rowIndex, 1:comp.NumColumns) = comp.createRowComponents(rowIndex);
+        
+            eventData = RowAddedEventData(rowIndex, rowData);
+            comp.notify('RowAdded', eventData)
+
+            if rowIndex == 1
+                comp.resizeTableColumns()
+            end
         end
     end
 
@@ -1161,6 +1411,25 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 flexWidth = (flexWidth / totalWidth);
                 flexWidth = flexWidth ./ min(flexWidth);
                 headerColumnWidths(isFlex) = arrayfun(@(x) sprintf('%.2fx', x), flexWidth, 'uni', 0);
+            end
+
+            % Update the column width for each header, moving the help icon
+            % next to the text
+            if comp.ShowColumnHeaderHelp
+                for i = 1:numel( comp.HeaderColumnTitle )
+                    if ~isempty( char(comp.HeaderColumnTitle(i).Text) )
+                        extent = getTextExtent(comp.HeaderColumnTitle(i).Text, ...
+                            "Name", comp.HeaderColumnTitle(i).FontName, ...
+                            "Size", comp.HeaderColumnTitle(i).FontSize, ...
+                            "Weight", comp.HeaderColumnTitle(i).FontWeight, ...
+                            "Units", 'pixels');
+                        if extent(1) + 25 < comp.HeaderColumnGridLayout(i).Position(3)
+                            comp.HeaderColumnGridLayout(i).ColumnWidth{1} = ceil(extent(1)); % Ad hoc...
+                        else
+                            comp.HeaderColumnGridLayout(i).ColumnWidth{1} = '1x';
+                        end
+                    end
+                end
             end
 
             if ~nargout
@@ -1348,7 +1617,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
             xPoint = hFigure.CurrentPoint(1);
             yPoint = hFigure.CurrentPoint(2);
-
+            
             colExtent = comp.computeColumnExtents( comp.TableRowGridLayout );
             rowExtent = comp.TableRowGridLayout.RowHeight{1} + comp.TableRowGridLayout.RowSpacing;
 
@@ -1438,6 +1707,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 case {'uint8', 'uint16'}
                     cellValue = double(cellValue);
                 case 'categorical'
+                    hControl.Items = categories(cellValue);
                     cellValue = char(cellValue);
             end
 
@@ -1448,7 +1718,10 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
         function appendRowData(comp, rowData)
 
-            if isa(comp.Data, 'table')
+            if isempty(comp.Data)
+                comp.Data_ = rowData;
+
+            elseif isa(comp.Data, 'table')
                 comp.Data_ = cat(1, comp.Data, rowData);
 
             elseif isa(comp.Data, 'struct')
@@ -1494,7 +1767,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 if isnumeric(cellValue)
                     cellValue = categorical(valueSet(cellValue), valueSet);
                 else
-                    cellValue = categorical({cellValue}, valueSet);
+                    if iscategorical(cellValue)
+                        % pass
+                    else
+                        cellValue = categorical({cellValue}, valueSet);
+                    end
                 end
             else
                 type = class(referenceValue);
@@ -1571,6 +1848,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.updateTableRowHeight()
 
             comp.createRows()
+            drawnow
             comp.resizeTableColumns()
 
             comp.updateBackgroundColor()
@@ -1610,7 +1888,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             % Create TableGridLayout
             comp.TableGridLayout = uigridlayout(comp.TablePanel);
             comp.TableGridLayout.ColumnWidth = {'1x'};
-            comp.TableGridLayout.RowHeight = {30, 1, '1x'};
+            comp.TableGridLayout.RowHeight = {comp.HeaderHeight, 1, '1x'};
             comp.TableGridLayout.ColumnSpacing = 0;
             comp.TableGridLayout.RowSpacing = 0;
             comp.TableGridLayout.Padding = [0 0 0 0];
@@ -1630,7 +1908,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.TableRowGridLayout.RowHeight = {20, 20, 20, 20, 20, 20, 20, 20};
             comp.TableRowGridLayout.ColumnSpacing = 1;
             comp.TableRowGridLayout.RowSpacing = 0;
-            comp.TableRowGridLayout.Padding = [0 10 0 4];
+            comp.TableRowGridLayout.Padding = [0 10 0 14];
             comp.TableRowGridLayout.Scrollable = 'on';
             comp.TableRowGridLayout.BackgroundColor = [1 1 1];
 

@@ -56,7 +56,7 @@ h.RowHeight = {'1x'};
 h.Padding = 20;
 
 % Create the WidgetTable component
-widgetTable = WidgetTable(h);
+widgetTable = WidgetTable(h, HeaderBackgroundColor="#FFFFFF", HeaderForegroundColor = "#002054", BackgroundColor = 'white');
 
 
 if isRatingComponentAvailable % Use the custom Rating component:
@@ -78,8 +78,10 @@ if isRatingComponentAvailable
     widgetTable.CellEditedFcn = @onCellEdited;
 end
 
-widgetTable.HeaderBackgroundColor = "#002054";
-widgetTable.HeaderForegroundColor = "w";
+% widgetTable.HeaderBackgroundColor = "#002054";
+% widgetTable.HeaderForegroundColor = "#FFFFFF";
+widgetTable.HeaderBackgroundColor = "#FFFFFF";
+widgetTable.HeaderForegroundColor = "#002054";
 widgetTable.BackgroundColor = 'w';
 
 % Callback function that makes sure the values for SelfAssessedHealthStatus and 
