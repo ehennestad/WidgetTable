@@ -2,6 +2,7 @@ classdef CellEditEventData < matlab.ui.eventdata.internal.AbstractEventData
     properties
         Indices
         DisplayIndices
+        ColumnName
         PreviousData
         EditData
         NewData
@@ -9,9 +10,10 @@ classdef CellEditEventData < matlab.ui.eventdata.internal.AbstractEventData
     
     methods
         % Constructor
-        function obj = CellEditEventData(indices, displayIndices, previousData, editData, newData)
+        function obj = CellEditEventData(indices, displayIndices, columnName, previousData, editData, newData)
             obj.Indices = indices;
             obj.DisplayIndices = displayIndices;
+            obj.ColumnName = columnName;
             obj.PreviousData = previousData;
             obj.EditData = editData;
             obj.NewData = newData;

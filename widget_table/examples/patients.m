@@ -49,7 +49,7 @@ end
 T = T(1:NumRowsToShow,:);
 
 % Create a figure
-f = uifigure('Name', 'Patients');
+f = uifigure('Name', 'Patients', 'Position', [100,100,820,400]);
 h = uigridlayout(f);
 h.ColumnWidth = {'1x'};
 h.RowHeight = {'1x'};

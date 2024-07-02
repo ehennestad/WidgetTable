@@ -12,7 +12,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
     end
     
     properties (Access = public)
-        ItemName (1,1) string = missing
+        ItemName (1,1) string = "Row" % Used for tooltips / display messages
         ColumnNames (1,:) cell
         ColumnHeaderHelpFcn
     end
@@ -37,13 +37,15 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         ColumnWidth = {}
         MinimumColumnWidth (1,:) double = 30 % Width in pixels. Scalar value or array with one element per column
         MaximumColumnWidth (1,:) double = 300 % Width in pixels. Scalar value or array with one element per column
-        
+        VisibleColumns (1,:) logical = true;
+
         ColumnSpacing = 20
         ColumnGridWidth = 1 % Currently only for header.
 
         FontName = 'helvetica' %'Segoe UI'
         CellEditedFcn
         %CellActionFcn % Todo
+        AddRowFcn
     end
 
     properties % Theme/color properties
@@ -155,6 +157,89 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
 
     methods % Public methods
+        
+        function reset(comp)
+            comp.resetUITable()
+
+            comp.Data = [];
+            comp.ColumnNames = {};
+            comp.ColumnWidget = {};
+            comp.ColumnWidth = {};
+            comp.MinimumColumnWidth = 30; 
+            comp.MaximumColumnWidth = 300;
+        end
+
+        function addRow(comp, rowData)
+        % addRow - Add a new row to the table given the row data.
+
+            % Todo: consider whether to use default row data if no row data
+            % is given as input.
+
+            comp.appendRowData(rowData)
+
+            comp.updateTableRowHeight()
+
+            if comp.EnableAddRows
+                comp.moveAddRowButton("down")
+            end
+
+            if ~isempty(comp.AddRowButtonGridInitial)
+                delete(comp.AddRowButtonGridInitial);
+                comp.AddRowButtonGridInitial=[];
+            end
+
+            if ~comp.AddRowButtonGrid.Visible
+                comp.AddRowButtonGrid.Visible = 'on';
+            end
+
+            rowIndex = comp.Height;
+            comp.createRowComponents(rowIndex);
+        
+            eventData = RowAddedEventData(rowIndex, rowData);
+            comp.notify('RowAdded', eventData)
+
+            if rowIndex == 1
+                comp.resizeTableColumns()
+            end
+        end
+        
+        function updateData(comp, data)
+
+            if isa(data, 'table')
+                cellData = table2cell(data);
+            elseif isa(data, 'struct')
+                cellData = struct2cell(data')';
+            else
+
+            end
+
+            numUITableRows = comp.Height;
+            numDataTableRows = size(cellData, 1);
+
+            comp.Data_ = data;
+
+            if numUITableRows > numDataTableRows
+                deleteInd = numDataTableRows+1:numUITableRows;
+                delete(comp.RowComponents(deleteInd, :));
+                comp.RowComponents(deleteInd, :) = [];
+                delete(comp.RowGridLayout(deleteInd, :));
+                comp.RowGridLayout(deleteInd) = [];
+            end
+
+            comp.updateTableRowHeight()
+
+            for iRow = 1:numDataTableRows
+                if iRow <= numUITableRows
+                    for jColumn = 1:size(cellData, 2)
+                        comp.updateCellValue(iRow, jColumn, cellData{iRow, jColumn});
+                    end
+                else
+                    comp.createRowComponents(iRow)
+                end
+            end
+            comp.moveAddRowButton('bottom')
+        end
+
         function updateCellValue(comp, rowIndex, columnIndex, cellValue)
             % No callback (i.e set programmatically)
             cellValue = comp.setCellValue(rowIndex, columnIndex, cellValue);
@@ -173,6 +258,32 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         function redraw(comp)
             comp.update()
             comp.resizeTableColumns()
+        end
+    
+        function enableAddRowButton(comp)
+            comp.AddRowButton.Enable = 'on';
+        end
+
+        function disableAddRowButton(comp)
+            comp.AddRowButton.Enable = 'off';
+        end
+
+        function enableRemoveRowButton(comp, rowInd)
+            if nargin < 2 || isempty(rowInd)
+                rowInd = 1:numel(comp.Height);
+            end
+            if comp.EnableAddRows
+                set( [comp.RowComponents{rowInd, 1}], 'Enable', 'on')
+            end
+        end
+
+        function disableRemoveRowButton(comp, rowInd)
+            if nargin < 2 || isempty(rowInd)
+                rowInd = 1:numel(comp.Height);
+            end
+            if comp.EnableAddRows
+                set( [comp.RowComponents{rowInd, 1}], 'Enable', 'off')
+            end
         end
     end
 
@@ -247,8 +358,10 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         function set.ColumnNames(comp, value)
             %comp.ColumnNames = strtrim(strsplit(value, ',')); % If string type
             comp.ColumnNames = value;
-            comp.updateColumnTitles()
-            comp.createHeader()
+            if ~isempty(value)
+                comp.updateColumnTitles()
+                comp.createHeader()
+            end
         end
 
         function set.ColumnWidth(comp, value)
@@ -288,6 +401,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        function set.VisibleColumns(comp, value)
+            comp.VisibleColumns = value;
+            comp.postSetVisibleColumns()
+        end
+
         function set.ColumnGridWidth(comp, value)
             comp.ColumnGridWidth = value;
             comp.postSetColumnGridWidth()
@@ -300,7 +418,10 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         
         function set.Data(comp, newValue)
             comp.Data_ = newValue;
-            comp.onDataSet()
+            if ~isempty(newValue)
+                comp.onDataSet()
+                % Todo: Use reset if empty...?
+            end
         end
         function data = get.Data(comp)
             data = comp.Data_;
@@ -373,7 +494,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             assert( isValid, ...
                 sprintf('%s column width must have a length of 1 or match the width of the table', name))
 
-            if columnWidth == 1
+            if numel(columnWidth) == 1
                 columnWidth = repmat(columnWidth, 1, comp.Width);
             end
         end
@@ -409,7 +530,6 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 return
             end
         end
-
 
         function postSetRowHeight(comp)
             comp.updateTableRowHeight()
@@ -467,6 +587,12 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        function postSetVisibleColumns(comp)
+        
+            % Todo: Update internal / actual?
+
+        end
+
         function postSetTablePadding(comp)
             % Todo
         end
@@ -505,7 +631,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
     methods (Access = private) % Callbacks
         function onDataSet(comp)
-            comp.resetTable()
+            comp.resetUITable()
             drawnow
 
             if comp.Height > 0 && ~isempty(comp.AddRowButtonGridInitial)
@@ -605,10 +731,8 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         end
         
         function createRows(comp)
-            numColumns = comp.NumColumns;
-
             for iRow = 1:comp.Height
-                comp.RowComponents(iRow, 1:numColumns) = comp.createRowComponents(iRow);
+                comp.createRowComponents(iRow);
                 if mod(iRow, 10)==0
                     drawnow
                 end
@@ -622,7 +746,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
-        function rowComponents = createRowComponents(comp, iRow)
+        function createRowComponents(comp, iRow)
             
             numColumns = comp.NumColumns;
             rowComponents = cell(1, numColumns);
@@ -640,6 +764,14 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 end
 
                 rowComponents{iColumn} = comp.createComponent(iRow, iColumn);
+            end
+
+            comp.RowComponents(iRow, 1:numColumns) = rowComponents;
+
+            if ~isempty(comp.AddRowButtonGridInitial)
+                delete(comp.AddRowButtonGridInitial)
+                comp.AddRowButtonGridInitial = [];
+                comp.AddRowButtonGrid.Visible = 'on';
             end
         end
             
@@ -686,6 +818,15 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                     case 'logical'
                         hControl = uicheckbox(parentContainer);
                         hControl.Text = '';
+                    
+                    otherwise
+                        if isenum(cellValue)
+                            hControl = uidropdown(parentContainer);
+                            [~, hControl.Items] = enumeration(cellValue);
+                            cellValue = char(cellValue);
+                        else
+                            warning('No default controls are defined for objects of class %s', class(cellValue))
+                        end
                 end
             end
 
@@ -928,10 +1069,17 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
     
-        function resetTable(comp)
+        function resetUITable(comp)
             delete(comp.HeaderColumnGridLayout)
             comp.HeaderColumnGridLayout(:) = [];
-            % delete components
+            comp.HeaderColumnTitle(:) = [];
+            comp.HelpButton(:) = [];
+
+            delete([comp.RowComponents{:}])
+            comp.RowComponents(:) = []; 
+
+            delete(comp.RowGridLayout)
+            comp.RowGridLayout(:) = [];
         end
     
         function updateFocusRow(comp, hFigure, yScrollOffset)
@@ -1053,7 +1201,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 comp.AddRowButton = comp.createAddRowButton(comp.NumRows, 1);
             end
         end
-    
+
         function updateBackgroundColor(comp)
             comp.TableRowGridLayout.BackgroundColor = comp.BackgroundColor;
             set(comp.RowGridLayout, 'BackgroundColor', comp.BackgroundColor)
@@ -1118,6 +1266,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             iColumn = find( [comp.RowComponents{iRow,:}] == src );
             iColumnIndexData = comp.getDataColumnIndex(iColumn);
             
+            % Get column name...
+            columnName = comp.getColumnNameForIndex(iColumnIndexData);
+
             previousData = comp.getCellValue(iRow, iColumnIndexData);
             newData = comp.setCellValue(iRow, iColumnIndexData, evt.Value);
 
@@ -1125,7 +1276,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             if ~isempty(comp.CellEditedFcn)
                 evtData = CellEditEventData( ...
                     [iRow, iColumnIndexData], ...
-                    [iRow, iColumn], previousData, newData, newData);
+                    [iRow, iColumn], columnName, previousData, newData, newData);
                 comp.CellEditedFcn(comp, evtData);
             end
         end
@@ -1161,6 +1312,12 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                             cellValue = double(cellValue);
                         case 'categorical'
                             cellValue = char(cellValue);
+                        otherwise
+                            if isenum(cellValue)
+                                cellValue = char(cellValue);
+                            else
+                                % Not handled
+                            end
                     end
 
                     if isprop(hControl, 'Value')
@@ -1213,38 +1370,23 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        % Callback function for button to add new rows.
         function onAddRowButtonPushed(comp, src, evt)
-            if ~isempty(comp.DefaultRowData_)
-                rowData = comp.DefaultRowData_;
-                comp.appendRowData(rowData)
+            if ~isempty(comp.AddRowFcn)
+                try
+                    comp.AddRowFcn();
+                catch ME
+                    hFigure = ancestor(comp, 'figure');
+                    uialert(hFigure, ME.message, sprintf('Failed to Add a New %s', comp.ItemName))
+                end
             else
-                comp.Data_ = cell2table( repmat({""}, 1, comp.Width), "VariableNames", comp.ColumnTitles);
-                rowData = comp.Data_; 
-            end
+                if ~isempty(comp.DefaultRowData_)
+                    rowData = comp.DefaultRowData_;
+                else
+                    rowData = cell2table( repmat({""}, 1, comp.Width), "VariableNames", comp.ColumnTitles);
+                end
 
-            comp.updateTableRowHeight()
-
-            if comp.EnableAddRows
-                comp.moveAddRowButton("down")
-            end
-
-            if ~isempty(comp.AddRowButtonGridInitial)
-                delete(comp.AddRowButtonGridInitial);
-                comp.AddRowButtonGridInitial=[];
-            end
-
-            if ~comp.AddRowButtonGrid.Visible
-                comp.AddRowButtonGrid.Visible = 'on';
-            end
-
-            rowIndex = comp.Height;
-            comp.RowComponents(rowIndex, 1:comp.NumColumns) = comp.createRowComponents(rowIndex);
-        
-            eventData = RowAddedEventData(rowIndex, rowData);
-            comp.notify('RowAdded', eventData)
-
-            if rowIndex == 1
-                comp.resizeTableColumns()
+                comp.addRow(rowData)
             end
         end
     end
@@ -1327,6 +1469,8 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             else
                 columnWidth = comp.ColumnWidth;
             end
+
+            % Todo: Remove width for non-visible columns...
             
             if comp.EnableAddRows
                 % Add extra column for which to create buttons for adding
@@ -1676,6 +1820,16 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        function columnName = getColumnNameForIndex(comp, columnIndex)
+            if isa(comp.Data, 'table')
+                columnNames = comp.Data.Properties.VariableNames;
+
+            elseif isa(comp.Data, 'struct')
+                columnNames = fieldnames(comp.Data);
+            end
+            columnName = columnNames{columnIndex};
+        end
+
         function cellValue = getCellValue(comp, rowIndex, columnIndex)
             if isa(comp.Data, 'table')
                 cellValue = comp.Data{rowIndex, columnIndex};
@@ -1709,6 +1863,13 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 case 'categorical'
                     hControl.Items = categories(cellValue);
                     cellValue = char(cellValue);
+                otherwise
+                    if isenum(cellValue)
+                        [~, hControl.Items] = enumeration(cellValue);
+                        cellValue = char(cellValue);
+                    else
+                        % Not handled
+                    end
             end
 
             if isprop(hControl, 'Value')
