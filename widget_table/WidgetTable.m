@@ -79,6 +79,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
     properties (Dependent, Access = private)
         NumRows
         NumColumns
+        NumVisibleColumns
         TotalColumnExtent
         HasFlexColumns logical
         FixedWidthColumnExtent
@@ -327,6 +328,15 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 numColumns = numColumns + 1;
             end
         end
+                
+        function numColumns = get.NumVisibleColumns(comp)
+            %numColumns = comp.Width;
+            numColumns = sum(comp.VisibleColumns);
+            
+            if comp.EnableAddRows
+                numColumns = numColumns + 1;
+            end
+        end
 
         function set.EnableAddRows(comp, value)
             oldValue = comp.EnableAddRows;
@@ -404,6 +414,13 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         function set.VisibleColumns(comp, value)
             comp.VisibleColumns = value;
             comp.postSetVisibleColumns()
+        end
+        function value = get.VisibleColumns(comp)
+            if isempty(comp.VisibleColumns) || numel(comp.VisibleColumns) == 1
+                value = true(1, comp.Width);
+            else
+                value = comp.VisibleColumns;
+            end
         end
 
         function set.ColumnGridWidth(comp, value)
@@ -494,7 +511,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             assert( isValid, ...
                 sprintf('%s column width must have a length of 1 or match the width of the table', name))
 
-            if numel(columnWidth) == 1
+            if numel(columnWidth) == 1 && comp.Width ~= 0
                 columnWidth = repmat(columnWidth, 1, comp.Width);
             end
         end
@@ -589,8 +606,14 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
         function postSetVisibleColumns(comp)
         
-            % Todo: Update internal / actual?
+            % Important to do this before resizing the actual grid, as the
+            % grid will not collapse if components are present in a grid
+            % possition upon changing the grid size.
+            comp.updateVisibleColumns()
 
+            % Trigger resize of the grid.
+            comp.updateInternalColumnWidth()
+            comp.resizeTableColumns()
         end
 
         function postSetTablePadding(comp)
@@ -662,6 +685,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             drawnow
             
             comp.resizeTableColumns()
+            %comp.updateVisibleColumns()
 
             rowData = comp.getRowData(1);
             comp.DefaultRowData_ = comp.resetData(rowData); % Clear all values.
@@ -1235,6 +1259,36 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 comp.HeaderColumnTitle(i).Layout.Column = [1,2];
             end
         end
+    
+        function updateVisibleColumns(comp)
+        % updateVisibleColumns - Change visibility of columns based on state.
+
+            visibleColumnIndex = double(comp.EnableAddRows);
+            columnOffset = double(comp.EnableAddRows);
+            
+            for iColumn = 1:comp.Width
+
+                if comp.VisibleColumns(iColumn)
+                    visibleColumnIndex = visibleColumnIndex + 1;
+                    visibleState = 'on';
+                    layoutColumnIdx = visibleColumnIndex;
+                else
+                    visibleState = 'off';
+                    layoutColumnIdx = 1; % place in 1st column
+                end
+
+                set([comp.RowComponents{:, iColumn+columnOffset}], 'Visible', visibleState)
+                comp.HeaderColumnGridLayout(iColumn+columnOffset).Visible = visibleState;
+
+                % Move all column components to the assigned position in grid
+                layout = get( [comp.RowComponents{:, iColumn+columnOffset}], 'Layout' );
+                for i = 1:numel(layout)
+                    layout{i}.Column = layoutColumnIdx;
+                end
+                set( [comp.RowComponents{:, iColumn+columnOffset}], {'Layout'}, layout );
+                comp.HeaderColumnGridLayout(iColumn+columnOffset).Layout.Column = layoutColumnIdx;
+            end
+        end    
     end
     
     methods (Access = private) % Sub-component callbacks
@@ -1470,8 +1524,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 columnWidth = comp.ColumnWidth;
             end
 
-            % Todo: Remove width for non-visible columns...
-            
+            % Remove width for non-visible columns...
+            columnWidth = columnWidth(comp.VisibleColumns);
+
             if comp.EnableAddRows
                 % Add extra column for which to create buttons for adding
                 % and removing rows.
@@ -1591,10 +1646,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         % computeActualColumnWidth - Compute actual column widths.
         %
         %   This method computes the actual column sizes and also adjusts
-        %   size of columns if they are smaller than the minimul allowed
+        %   size of columns if they are smaller than the minimum allowed
         %   size
 
-            isAdjusted = deal( false(1, comp.NumColumns) );
+            %isAdjusted = deal( false(1, comp.NumColumns) );
+            isAdjusted = deal( false(1, comp.NumVisibleColumns) );
 
             % Extract the grid layout columns and column spacing
             actualColumnWidths = comp.InternalColumnWidth;
@@ -1608,8 +1664,8 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
             % Check if any relative column widths need to be updated with
             % minimum values...
-            minimumColumnWidth = comp.MinimumColumnWidth;
-            maximumColumnWidth = comp.MaximumColumnWidth;
+            minimumColumnWidth = comp.MinimumColumnWidth(comp.VisibleColumns);
+            maximumColumnWidth = comp.MaximumColumnWidth(comp.VisibleColumns);
 
             if comp.EnableAddRows
                 % Add column for add/remove buttons
@@ -1708,7 +1764,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             isFlexUnit = comp.isFlexSize(comp.InternalColumnWidth);
             
             flexWeights = zeros( size(comp.InternalColumnWidth) );
-            for i = 1:comp.NumColumns
+            for i = 1:comp.NumVisibleColumns
                 if isFlexUnit(i)
                     width = comp.InternalColumnWidth{i};
                     flexWeights(i) = str2double(extractBefore(width, 'x'));
@@ -1736,7 +1792,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             gridPosition = getpixelposition(comp.TableRowGridLayout, true);
             totalWidth = round(gridPosition(3));
 
-            totalColumnSpacing = comp.ColumnSpacing * (comp.NumColumns - 1);
+            totalColumnSpacing = comp.ColumnSpacing * (comp.NumVisibleColumns - 1);
             horizontalPadding = sum( comp.TablePadding([1,3]) );
             
             availableWidth = totalWidth - totalColumnSpacing - horizontalPadding;
@@ -1775,12 +1831,14 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             rowInd = ceil(yOffsetFromTop/rowExtent);
             colInd = getGridColumnIndexForPoint(comp.RowGridLayout(1), xPoint);
             
+            % Todo: Adjust based on visible columns
+
             % Make sure returned indices are within bounds of table
             if rowInd < 1 || rowInd > comp.Height
                 rowInd = -1;
             end
 
-            if colInd < 1 || colInd > comp.NumColumns
+            if colInd < 1 || colInd > comp.NumVisibleColumns
                 colInd = -1;
             end
         end
