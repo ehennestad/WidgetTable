@@ -146,9 +146,6 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         % Dummy grid used for validating ColumnWidth
         DummyGridLayout matlab.ui.container.GridLayout
         UseDummyFlexColumn matlab.lang.OnOffSwitchState = "off"
-        LastMousePoint
-        LastMouseTic
-        PointerOffset
     end
 
     properties (Constant, Access=private)
@@ -474,7 +471,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             totalColumnWidth = sum([columnWidth{isNumeric}]);
 
             value = totalColumnWidth ... 
-                    + comp.ColumnSpacing * (comp.NumColumns-1) ...
+                    + comp.ColumnSpacing * (comp.NumVisibleColumns-1) ...
                     + sum(comp.TablePadding([1,3])); 
         end
         
@@ -531,8 +528,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
 
             for i = 1:numel(comp.HeaderColumnTitle)
-                comp.updateColumnTitle(i)
+                %comp.updateColumnTitle(i)
             end
+
             comp.updateTableRowHeight()
             comp.resizeTableColumns()
         end
@@ -698,7 +696,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
         function onMouseMotion(comp, src, evt)
         % onMouseMotion - Callback for mousemotion over component    
-            comp.updateFocusRow(src)
+            comp.updateFocusRow(src, evt)
             if isempty(comp.RowGridLayout); return; end
 
             [iRow, iCol] = comp.getCellForPointer(src);
@@ -730,7 +728,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         
         function onTableViewportLocationChanging(comp, src, evt)
             yScrollOffset = evt.ScrollableViewportLocation(2);
-            comp.updateFocusRow([], yScrollOffset)
+            comp.updateFocusRow([], [], yScrollOffset)
         end
     end
 
@@ -854,7 +852,12 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 end
             end
 
-            hControl.Layout.Column = iColumn; 
+            if ~comp.VisibleColumns(iColData)
+                hControl.Visible = 'off';
+                hControl.Layout.Column = 1;
+            else
+                hControl.Layout.Column = sum(comp.VisibleColumns(1:iColData))+double(comp.EnableAddRows);
+            end
             hControl.Layout.Row = 1;
 
             if isprop(hControl, 'Value')
@@ -1106,46 +1109,36 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.RowGridLayout(:) = [];
         end
     
-        function updateFocusRow(comp, hFigure, yScrollOffset)
+        function updateFocusRow(comp, hFigure, evt, yScrollOffset)
         % updateFocusRow - Update appearance of row in focus.
         
             if nargin < 2 || isempty(hFigure)
                 hFigure = ancestor(comp, 'figure');
             end
-            if nargin < 3 || isempty(yScrollOffset)
+            if nargin < 4 || isempty(yScrollOffset)
                 yScrollOffset = comp.TableRowGridLayout.ScrollableViewportLocation(2);
-            end
-
-            if isempty(comp.LastMousePoint)
-                comp.LastMousePoint = hFigure.CurrentPoint;
-                comp.LastMouseTic = tic;
-                comp.PointerOffset = [0,0];
-            end
-
-            if toc(comp.LastMouseTic) > 1 % Reset...
-                comp.LastMousePoint = hFigure.CurrentPoint;
-                comp.PointerOffset = [0,0];
             end
 
             currentPoint = hFigure.CurrentPoint;
 
-            offset = abs( comp.LastMousePoint - currentPoint );
-            
-            % Correct a weird bug(?) in MATLAB
-            if any(offset > 50)
-                if any( comp.PointerOffset )
-                    comp.PointerOffset = [0,0];
-                else
-                    comp.PointerOffset = comp.LastMousePoint - currentPoint;
+            if ~isempty(evt)
+                % If the hit object is an html component, the figure's
+                % current point property is given relative to the
+                % component, not to the figure. Here the point referenced
+                % to the figure is computed if the mouse is over an html
+                % component.
+                if evt.HitObject.Type == "uihtml" && ~isempty(evt.HitObject.HTMLSource)
+                    currentPoint = comp.getAbsolutePointForHtml(evt.HitObject, hFigure);
                 end
             end
-            yPoint = currentPoint(2) + comp.PointerOffset(2);
+
+            yPoint = currentPoint(2);
             
             rowExtent = comp.TableRowGridLayout.RowHeight{1} + comp.TableRowGridLayout.RowSpacing;
 
             pos = comp.CachedTableRowGridPosition;
             y0 = pos(2);
-            yPoint = yPoint-y0;
+            yPoint = yPoint - y0;
             
             yPaddingTop = comp.TableRowGridLayout.Padding(4);
             
@@ -1161,9 +1154,6 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             else
                 % pass (All bg colors are reset before this block)
             end
-            
-            comp.LastMouseTic = tic;
-            comp.LastMousePoint = currentPoint;
         end
     
         function updateColumnTitle(comp, iColumn, hControl)
@@ -1192,11 +1182,21 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             for iRow = 1:comp.Height
                 delete( comp.RowComponents{iRow, 1} )
                 for jCol = 2:comp.NumColumns+1
-                    comp.RowComponents{iRow, jCol}.Layout.Column = jCol-1;
+                    if comp.VisibleColumns(jCol-1)
+                        colIdx = comp.RowComponents{iRow, jCol}.Layout.Column;
+                        comp.RowComponents{iRow, jCol}.Layout.Column = colIdx-1;
+                    end
+                end
+            end
+                
+            for jCol = 2:comp.NumColumns+1
+                if comp.VisibleColumns(jCol-1)
+                    columnIdx = comp.HeaderColumnGridLayout(jCol).Layout.Column;
+                    comp.HeaderColumnGridLayout(jCol).Layout.Column = columnIdx-1;
                 end
             end
 
-            comp.RowComponents(1:comp.Height,1) = [];
+            comp.RowComponents(:, 1) = [];
 
             % Hide add button...
             if ~isempty(comp.AddRowButtonGrid)
@@ -1211,11 +1211,21 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             for iRow = 1:comp.Height
                 removeButtons(iRow) = comp.createRemoveRowButton(iRow, 1);
                 for jCol = 1:comp.NumColumns-1
-                    comp.RowComponents{iRow, jCol}.Layout.Column = jCol+1;
+                    if comp.VisibleColumns(jCol)
+                        colIdx = comp.RowComponents{iRow, jCol}.Layout.Column;
+                        comp.RowComponents{iRow, jCol}.Layout.Column = colIdx+1;
+                    end
                 end
             end
             removeButtons = num2cell(removeButtons);
             comp.RowComponents = cat(2, removeButtons', comp.RowComponents);
+
+            for jCol = 2:comp.NumColumns
+                if comp.VisibleColumns(jCol-1)
+                    columnIdx = comp.HeaderColumnGridLayout(jCol).Layout.Column;
+                    comp.HeaderColumnGridLayout(jCol).Layout.Column = columnIdx+1;
+                end
+            end
 
             % Show add button...
             if ~isempty(comp.AddRowButtonGrid)
@@ -1282,6 +1292,10 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
                 % Move all column components to the assigned position in grid
                 layout = get( [comp.RowComponents{:, iColumn+columnOffset}], 'Layout' );
+                if ~iscell(layout) && numel(layout)==1
+                    layout = {layout};
+                end
+
                 for i = 1:numel(layout)
                     layout{i}.Column = layoutColumnIdx;
                 end
@@ -1319,6 +1333,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             iRow = src.Parent.Layout.Row;
             iColumn = find( [comp.RowComponents{iRow,:}] == src );
             iColumnIndexData = comp.getDataColumnIndex(iColumn);
+            iColumnIndexVisible = sum(comp.VisibleColumns(1:iColumnIndexData)) + double(comp.EnableAddRows);
             
             % Get column name...
             columnName = comp.getColumnNameForIndex(iColumnIndexData);
@@ -1330,7 +1345,8 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             if ~isempty(comp.CellEditedFcn)
                 evtData = CellEditEventData( ...
                     [iRow, iColumnIndexData], ...
-                    [iRow, iColumn], columnName, previousData, newData, newData);
+                    [iRow, iColumnIndexVisible], ...
+                    columnName, previousData, newData, newData);
                 comp.CellEditedFcn(comp, evtData);
             end
         end
@@ -1402,7 +1418,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 comp.moveAddRowButton("up")
             end
 
-            delete( comp.RowGridLayout(end) )
+            delete( comp.RowGridLayout(end) ) % Also deletes components.
+
+            comp.RowComponents(end,:) = [];
             comp.RowGridLayout(end) = [];
 
             comp.updateTableRowHeight()
@@ -2048,6 +2066,14 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             else
                 tf = isOfFormNx(value);
             end
+        end
+    
+        function point = getAbsolutePointForHtml(hitObject, hFigure)
+            htmlPos = getpixelposition(hitObject, true);
+
+            offset = [htmlPos(1), htmlPos(2)+htmlPos(4)];
+            point(1) = hFigure.CurrentPoint(1) + offset(1) - 1; % Add 1 to get back into MATLAB coords.
+            point(2) = offset(2) + hFigure.CurrentPoint(2) - hFigure.Position(4) + 1;
         end
     end
 
