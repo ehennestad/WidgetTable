@@ -1977,7 +1977,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 comp.Data_ = cat(1, comp.Data, rowData);
 
             elseif isa(comp.Data, 'struct')
-                if icolumn(comp.Data)
+                if iscolumn(comp.Data)
                     comp.Data_ = cat(1, comp.Data, rowData);
                 else
                     comp.Data_ = cat(2, comp.Data, rowData);
