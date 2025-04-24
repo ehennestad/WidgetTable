@@ -22,6 +22,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
     properties (Dependent)
         Data
+        VariableNames
         Height % Height of table (does not include "internal" columns)
         Width  % Width of table (does not include "internal" columns)
     end
@@ -136,7 +137,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         
         % Cached pixelposition for the TableRowGrid property. This value is
         % used frequently on mouse-over and is therefore cached in a property.
-        CachedTableRowGridPosition
+        CachedTableRowGridPosition = [nan, nan, nan, nan]
 
         % Numeric flex weights (0 for non-flex columns)
         ColumnFlexWeights (1,:) double
@@ -244,6 +245,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.updateComponentValue(rowIndex, columnIndex, cellValue)
         end
     
+        function hControl = getRowControl(comp, rowIndex, columnIndex)
+            rowComponentColIdx = sum(comp.VisibleColumns(1:columnIndex)) + double(comp.EnableAddRows);
+            hControl = comp.RowComponents{rowIndex, rowComponentColIdx};
+        end
+
         function setDefaultRowData(comp, rowData)
             if ~isempty(comp.Data)
                 error('Can not set "DefaultRowData" when "Data" is non-empty')
@@ -439,6 +445,14 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         end
         function data = get.Data(comp)
             data = comp.Data_;
+        end
+
+        function names = get.VariableNames(comp)
+            if isa(comp.Data_, 'table')
+                names = comp.Data.Properties.VariableNames;
+            elseif isa(comp.Data_, 'struct')
+                names = fieldnames(comp.Data);
+            end
         end
 
         function set.HeaderBackgroundColor(comp, newValue)
@@ -1137,6 +1151,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             rowExtent = comp.TableRowGridLayout.RowHeight{1} + comp.TableRowGridLayout.RowSpacing;
 
             pos = comp.CachedTableRowGridPosition;
+            if all(isnan(pos)); return; end
             y0 = pos(2);
             yPoint = yPoint - y0;
             
