@@ -2099,6 +2099,8 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 else
                     if iscategorical(cellValue)
                         % pass
+                    elseif isstring(cellValue)
+                        cellValue = categorical(cellValue, valueSet);
                     else
                         cellValue = categorical({cellValue}, valueSet);
                     end
