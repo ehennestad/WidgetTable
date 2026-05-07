@@ -115,7 +115,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         SizeChangedListener
         MouseMotionListener
         HeaderColumnImage (1,:) matlab.ui.control.Image
-        HelpButton (1,:) IconButton
+        HelpButton (1,:) matlab.ui.componentcontainer.ComponentContainer
         AddRowButtonGridInitial
         AddRowButtonInitial
     end
@@ -1152,6 +1152,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
     
         function h = displayWaitbar(comp, message)
             hFigure = ancestor(comp, 'figure');
+            h = [];
+            if isempty(hFigure) || strcmp(hFigure.Visible, 'off')
+                return
+            end
+
             h = uiprogressdlg(hFigure, "Indeterminate", "on", "Message", message);
         end
     end
