@@ -270,9 +270,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             else
                 previousValue = hControl.Value;
                 hControl.Items = items;
+                currentValue = hControl.Value;
 
-                if ~isequal(hControl.Value, previousValue)
-                    currentValue = hControl.Value;
+                if ~isequal(string(currentValue), string(previousValue))
                     comp.updateCellValue(rowIndex, columnIndex, currentValue)
 
                     % updateCellValue restores column-level Items for
