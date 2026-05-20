@@ -53,6 +53,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         HeaderForegroundColor = "white"
         HeaderTextColor = "black"
         HeaderBackgroundColor = "#303E4C"
+        RowHighlightingEnabled matlab.lang.OnOffSwitchState = "on" 
     end
     
     properties (Dependent)
@@ -1195,7 +1196,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
     
         function updateFocusRow(comp, hFigure, evt, yScrollOffset)
         % updateFocusRow - Update appearance of row in focus.
-        
+            
+            if ~comp.RowHighlightingEnabled
+                return
+            end
+
             if nargin < 2 || isempty(hFigure)
                 hFigure = ancestor(comp, 'figure');
             end
