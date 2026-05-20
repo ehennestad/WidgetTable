@@ -271,9 +271,9 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             else
                 previousValue = hControl.Value;
                 hControl.Items = items;
+                currentValue = hControl.Value;
 
-                if ~isequal(hControl.Value, previousValue)
-                    currentValue = hControl.Value;
+                if ~isequal(string(currentValue), string(previousValue))
                     comp.updateCellValue(rowIndex, columnIndex, currentValue)
 
                     % updateCellValue restores column-level Items for
@@ -534,24 +534,34 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
     methods (Access = private) % Validation methods
         function validateDataCellIndex(comp, rowIndex, columnIndex)
+            tableHeight = comp.Height;
+            tableWidth = comp.Width;
+
+            if tableHeight == 0 || tableWidth == 0
+                error('WidgetTable:InvalidCellIndex', ...
+                    ['Cell APIs require non-empty table data. ', ...
+                     'The current table has %d row(s) and %d column(s).'], ...
+                    tableHeight, tableWidth)
+            end
+
             isValidRow = isscalar(rowIndex) ...
                 && isnumeric(rowIndex) ...
                 && isfinite(rowIndex) ...
                 && fix(rowIndex) == rowIndex ...
                 && rowIndex >= 1 ...
-                && rowIndex <= comp.Height;
+                && rowIndex <= tableHeight;
 
             isValidColumn = isscalar(columnIndex) ...
                 && isnumeric(columnIndex) ...
                 && isfinite(columnIndex) ...
                 && fix(columnIndex) == columnIndex ...
                 && columnIndex >= 1 ...
-                && columnIndex <= comp.Width;
+                && columnIndex <= tableWidth;
 
             if ~(isValidRow && isValidColumn)
                 error('WidgetTable:InvalidCellIndex', ...
                     'Cell index must be within the data table bounds: row 1-%d, column 1-%d.', ...
-                    comp.Height, comp.Width)
+                    tableHeight, tableWidth)
             end
         end
 
