@@ -11,6 +11,7 @@ function colIdx = getGridColumnIndexForPoint(uigrid, xCoord)
     gridPos = getpixelposition(uigrid, true);
     % Extract the grid layout columns and column spacing
     columnWidths = uigrid.ColumnWidth;
+    numColumns = numel(columnWidths);
     columnSpacing = uigrid.ColumnSpacing;
     gridPaddingX = sum(uigrid.Padding([1,3]));
 
@@ -21,7 +22,7 @@ function colIdx = getGridColumnIndexForPoint(uigrid, xCoord)
     % Calculate the total proportional units
     flexUnits = 0;
     fixedWidthTotal = 0;
-    for i = 1:length(columnWidths)
+    for i = 1:numColumns
         if ischar(columnWidths{i}) && endsWith(columnWidths{i}, 'x')
             flexUnits = flexUnits + str2double(extractBefore(columnWidths{i}, 'x'));
         else
@@ -30,11 +31,11 @@ function colIdx = getGridColumnIndexForPoint(uigrid, xCoord)
     end
 
     % Calculate the width of one flex unit
-    remainingWidth = gridPos(3) - fixedWidthTotal - columnSpacing * (length(columnWidths) - 1) - gridPaddingX;
+    remainingWidth = gridPos(3) - fixedWidthTotal - columnSpacing * (numColumns - 1) - gridPaddingX;
     flexUnitWidth = remainingWidth / flexUnits;
 
     % Loop through each column to find where the x-coordinate lies
-    for i = 1:length(columnWidths)
+    for i = 1:numColumns
         if ischar(columnWidths{i}) && endsWith(columnWidths{i}, 'x')
             % Calculate the width for flex columns
             currentWidth = str2double(extractBefore(columnWidths{i}, 'x')) * flexUnitWidth;
@@ -45,7 +46,7 @@ function colIdx = getGridColumnIndexForPoint(uigrid, xCoord)
 
         % Update the total width traversed, including spacing
         totalWidth = totalWidth + currentWidth;
-        if i < length(columnWidths)
+        if i < numColumns
             totalWidth = totalWidth + columnSpacing;
         end
 

@@ -394,7 +394,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.postSetMinimumColumnWidth()
         end
         function value = get.MinimumColumnWidth(comp)
-            if numel(comp.MinimumColumnWidth) == 1
+            if isscalar(comp.MinimumColumnWidth)
                 value = repmat(comp.MinimumColumnWidth, 1, comp.Width);
             else
                 value = comp.MinimumColumnWidth;
@@ -407,7 +407,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.postSetMaximumColumnWidth()
         end
         function value = get.MaximumColumnWidth(comp)
-            if numel(comp.MaximumColumnWidth) == 1
+            if isscalar(comp.MaximumColumnWidth)
                 value = repmat(comp.MaximumColumnWidth, 1, comp.Width);
             else
                 value = comp.MaximumColumnWidth;
@@ -419,7 +419,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.postSetVisibleColumns()
         end
         function value = get.VisibleColumns(comp)
-            if isempty(comp.VisibleColumns) || numel(comp.VisibleColumns) == 1
+            if isempty(comp.VisibleColumns) || isscalar(comp.VisibleColumns)
                 value = true(1, comp.Width);
             else
                 value = comp.VisibleColumns;
@@ -518,11 +518,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         % validateColumnWidth - Validate the size of column width spec
             if nargin < 3; name = 'Preferred'; end
 
-            isValid = numel(columnWidth) == 1 || numel(columnWidth) == comp.Width;
+            isValid = isscalar(columnWidth) || numel(columnWidth) == comp.Width;
             assert( isValid, ...
                 sprintf('%s column width must have a length of 1 or match the width of the table', name))
 
-            if numel(columnWidth) == 1 && comp.Width ~= 0
+            if isscalar(columnWidth) && comp.Width ~= 0
                 columnWidth = repmat(columnWidth, 1, comp.Width);
             end
         end
@@ -628,7 +628,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.resizeTableColumns()
         end
 
-        function postSetTablePadding(comp)
+        function postSetTablePadding(~)
             % Todo
         end
 
@@ -703,7 +703,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             comp.DefaultRowData_ = comp.resetData(rowData); % Clear all values.
         end
 
-        function onComponentSizeChanged(comp, src, evt)
+        function onComponentSizeChanged(comp, ~, ~)
             if isempty(comp.RowGridLayout); return; end
             comp.resizeTableColumns()
         end
@@ -740,7 +740,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
         
-        function onTableViewportLocationChanging(comp, src, evt)
+        function onTableViewportLocationChanging(comp, ~, evt)
             yScrollOffset = evt.ScrollableViewportLocation(2);
             comp.updateFocusRow([], [], yScrollOffset)
         end
@@ -1307,7 +1307,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
 
                 % Move all column components to the assigned position in grid
                 layout = get( [comp.RowComponents{:, iColumn+columnOffset}], 'Layout' );
-                if ~iscell(layout) && numel(layout)==1
+                if ~iscell(layout) && isscalar(layout)
                     layout = {layout};
                 end
 
@@ -1321,7 +1321,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
     end
     
     methods (Access = private) % Sub-component callbacks
-        function onColumnTitleClicked(comp, src, evt)
+        function onColumnTitleClicked(comp, ~, ~)
         % onColumnTitleClicked - Handle button press on column title
             hFigure = ancestor(comp, 'figure');
             uialert(hFigure, 'Clicked column title', '')
@@ -1366,7 +1366,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
-        function onRemoveRowButtonPushed(comp, src, evt)
+        function onRemoveRowButtonPushed(comp, src, ~)
             drawnow
 
             rowIndex = find( [comp.RowComponents{:,1}]==src, 1, "first" );
@@ -1458,7 +1458,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         end
 
         % Callback function for button to add new rows.
-        function onAddRowButtonPushed(comp, src, evt)
+        function onAddRowButtonPushed(comp, ~, ~)
             if ~isempty(comp.AddRowFcn)
                 try
                     comp.AddRowFcn();
@@ -1670,7 +1670,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
         
-        function computeFixedHeaderColumnGridWidth(comp)
+        function computeFixedHeaderColumnGridWidth(~)
         % computeFixedHeaderColumnGridWidth - Compute fixed width for header
 
         end
@@ -1845,13 +1845,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         % getCellForPointer - Get cell where pointer is located.    
             
             % Todo: Consider x-scroll offset?
-            xScrollOffset = comp.TableRowGridLayout.ScrollableViewportLocation(1);
             yScrollOffset = comp.TableRowGridLayout.ScrollableViewportLocation(2);
 
             xPoint = hFigure.CurrentPoint(1);
             yPoint = hFigure.CurrentPoint(2);
             
-            colExtent = comp.computeColumnExtents( comp.TableRowGridLayout );
             rowExtent = comp.TableRowGridLayout.RowHeight{1} + comp.TableRowGridLayout.RowSpacing;
 
             %pos = getpixelposition(comp.TableRowGridLayout, true);
