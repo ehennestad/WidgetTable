@@ -54,6 +54,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         HeaderForegroundColor = "white"
         HeaderTextColor = "black"
         HeaderBackgroundColor = "#303E4C"
+        RowHighlightingEnabled matlab.lang.OnOffSwitchState = "on" 
     end
     
     properties (Dependent)
@@ -116,7 +117,7 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
         SizeChangedListener
         MouseMotionListener
         HeaderColumnImage (1,:) matlab.ui.control.Image
-        HelpButton (1,:) IconButton
+        HelpButton (1,:) matlab.ui.componentcontainer.ComponentContainer
         AddRowButtonGridInitial
         AddRowButtonInitial
     end
@@ -243,6 +244,52 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             % No callback (i.e set programmatically)
             cellValue = comp.setCellValue(rowIndex, columnIndex, cellValue);
             comp.updateComponentValue(rowIndex, columnIndex, cellValue)
+        end
+
+        function setCellOptions(comp, rowIndex, columnIndex, items, value)
+        % setCellOptions - Set dropdown items for one data cell.
+        % If value is omitted and MATLAB changes the dropdown value because
+        % the previous value is no longer in Items, Data is updated to match.
+            comp.validateDataCellIndex(rowIndex, columnIndex)
+            comp.validateCellOptions(items)
+
+            hControl = comp.getCellComponent(rowIndex, columnIndex);
+            if ~isa(hControl, 'matlab.ui.control.DropDown')
+                error('WidgetTable:CellNotDropDown', ...
+                    'Cell (%d, %d) is a %s, not a DropDown.', ...
+                    rowIndex, columnIndex, class(hControl))
+            end
+
+            if nargin >= 5
+                dropdownValue = comp.getDropdownValueForCellValue(rowIndex, columnIndex, value);
+                if ~any(string(dropdownValue) == string(items))
+                    error('WidgetTable:InvalidCellValue', ...
+                        'Value must be one of the supplied dropdown items.')
+                end
+
+                comp.updateCellValue(rowIndex, columnIndex, value)
+                hControl.Items = items;
+            else
+                previousValue = hControl.Value;
+                hControl.Items = items;
+                currentValue = hControl.Value;
+
+                if ~isequal(string(currentValue), string(previousValue))
+                    comp.updateCellValue(rowIndex, columnIndex, currentValue)
+
+                    % updateCellValue restores column-level Items for
+                    % categorical/enum values, so reapply the per-cell list.
+                    hControl.Items = items;
+                end
+            end
+        end
+
+        function hControl = getCellComponent(comp, rowIndex, columnIndex)
+        % getCellComponent - Return the rendered UI control for one data cell.
+            comp.validateDataCellIndex(rowIndex, columnIndex)
+
+            viewColumnIndex = comp.getViewColumnIndex(columnIndex);
+            hControl = comp.RowComponents{rowIndex, viewColumnIndex};
         end
     
         function hControl = getRowControl(comp, rowIndex, columnIndex)
@@ -500,6 +547,49 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
     end
 
     methods (Access = private) % Validation methods
+        function validateDataCellIndex(comp, rowIndex, columnIndex)
+            tableHeight = comp.Height;
+            tableWidth = comp.Width;
+
+            if tableHeight == 0 || tableWidth == 0
+                error('WidgetTable:InvalidCellIndex', ...
+                    ['Cell APIs require non-empty table data. ', ...
+                     'The current table has %d row(s) and %d column(s).'], ...
+                    tableHeight, tableWidth)
+            end
+
+            isValidRow = isscalar(rowIndex) ...
+                && isnumeric(rowIndex) ...
+                && isfinite(rowIndex) ...
+                && fix(rowIndex) == rowIndex ...
+                && rowIndex >= 1 ...
+                && rowIndex <= tableHeight;
+
+            isValidColumn = isscalar(columnIndex) ...
+                && isnumeric(columnIndex) ...
+                && isfinite(columnIndex) ...
+                && fix(columnIndex) == columnIndex ...
+                && columnIndex >= 1 ...
+                && columnIndex <= tableWidth;
+
+            if ~(isValidRow && isValidColumn)
+                error('WidgetTable:InvalidCellIndex', ...
+                    'Cell index must be within the data table bounds: row 1-%d, column 1-%d.', ...
+                    tableHeight, tableWidth)
+            end
+        end
+
+        function validateCellOptions(~, items)
+            isValidItems = (isstring(items) || iscellstr(items)) ...
+                && isvector(items) ...
+                && ~isempty(items);
+
+            if ~isValidItems
+                error('WidgetTable:InvalidCellOptions', ...
+                    'Items must be a nonempty string array or cell array of character vectors.')
+            end
+        end
+
         function validateRowColumnSize(comp, value)
             if ~isempty(comp.Data)
                 assert( numel(value) == comp.Width, ...
@@ -1087,6 +1177,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
     
         function h = displayWaitbar(comp, message)
             hFigure = ancestor(comp, 'figure');
+            h = [];
+            if isempty(hFigure) || strcmp(hFigure.Visible, 'off')
+                return
+            end
+
             h = uiprogressdlg(hFigure, "Indeterminate", "on", "Message", message);
         end
     end
@@ -1125,7 +1220,11 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
     
         function updateFocusRow(comp, hFigure, evt, yScrollOffset)
         % updateFocusRow - Update appearance of row in focus.
-        
+            
+            if ~comp.RowHighlightingEnabled
+                return
+            end
+
             if nargin < 2 || isempty(hFigure)
                 hFigure = ancestor(comp, 'figure');
             end
@@ -1966,6 +2065,15 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
             end
         end
 
+        function dropdownValue = getDropdownValueForCellValue(comp, rowIndex, columnIndex, cellValue)
+            referenceValue = comp.getCellValue(rowIndex, columnIndex);
+            dropdownValue = comp.ensureCorrectType(cellValue, referenceValue);
+
+            if iscategorical(dropdownValue) || isenum(dropdownValue)
+                dropdownValue = char(dropdownValue);
+            end
+        end
+
         function appendRowData(comp, rowData)
 
             if isempty(comp.Data)
@@ -2019,6 +2127,8 @@ classdef WidgetTable < matlab.ui.componentcontainer.ComponentContainer
                 else
                     if iscategorical(cellValue)
                         % pass
+                    elseif isstring(cellValue)
+                        cellValue = categorical(cellValue, valueSet);
                     else
                         cellValue = categorical({cellValue}, valueSet);
                     end
